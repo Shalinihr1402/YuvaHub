@@ -1,5 +1,5 @@
 import { Collection, ObjectId } from 'mongodb';
-import { dbCommand } from '../db.js';
+import { dbCommand } from '../api/db.js';
 
 export interface ResumeDraft {
   _id?: ObjectId;

@@ -45,7 +45,7 @@ export const documentProcessingWorker = new Worker(
             logger.info(`Document ${documentId} processed successfully.`);
             return { status: 'completed', documentId };
         } catch (error) {
-            logger.error(`Document processing failed for ID ${documentId}:`, error);
+            logger.error({ err: error }, `Document processing failed for ID ${documentId}`);
             await SecureDocument.findByIdAndUpdate(documentId, { status: 'failed' });
             throw error;
         }

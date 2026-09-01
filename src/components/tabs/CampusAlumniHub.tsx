@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   GraduationCap,
   Building2,
@@ -35,6 +35,35 @@ import { downloadICS } from '../../lib/icsExport';
 
 export default function CampusAlumniHub() {
   const { user, profile } = useAppContext();
+
+  useEffect(() => {
+    const fetchDirectory = async () => {
+      try {
+        const res = await fetch('/api/v1/alumni/directory?limit=20');
+        if (!res.ok) return;
+        const data = await res.json();
+        const directory = Array.isArray(data?.data) ? data.data : [];
+        const mapped = directory.map((entry: any) => ({
+          id: entry.id || entry.uid || entry._id,
+          name: entry.name || 'Alumni Member',
+          college: entry.college || 'University',
+          gradYear: entry.graduation_year || 'N/A',
+          currentRole: entry.current_role || entry.field || 'Community Leader',
+          location: entry.city || entry.country || 'Remote',
+          referralsAvailable: Boolean(entry.is_open_to_mentoring),
+          tags: [entry.current_company || 'Mentor', ...(entry.mentoring_interests || []).slice(0, 3)],
+          current_company: entry.current_company || '',
+          alumni_profile_bio: entry.alumni_profile_bio || '',
+          is_open_to_mentoring: Boolean(entry.is_open_to_mentoring),
+        }));
+        if (mapped.length) setAlumni(mapped);
+      } catch (err) {
+        console.warn('Alumni directory fetch failed:', err);
+      }
+    };
+
+    void fetchDirectory();
+  }, []);
 
   // Navigation State
   const [activeTab, setActiveTab] = useState<'chapters' | 'alumni' | 'events' | 'referrals' | 'export'>('chapters');
@@ -159,6 +188,7 @@ export default function CampusAlumniHub() {
   const [referralRequests, setReferralRequests] = useState([
     { id: 'ref_1', alumniName: 'Siddharth Rao', role: 'Software Engineer Intern', status: 'PENDING', date: '2026-08-01' }
   ]);
+  const [requestingMentorId, setRequestingMentorId] = useState<string | null>(null);
   const [targetAlumni, setTargetAlumni] = useState('');
   const [targetRole, setTargetRole] = useState('');
 
@@ -204,9 +234,36 @@ export default function CampusAlumniHub() {
   };
 
   // Submit Referral Request
-  const handleRequestReferral = (e: React.FormEvent) => {
+  const handleRequestReferral = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!user) {
+      setNotification({ type: 'error', message: 'Please sign in before requesting mentorship.' });
+      return;
+    }
     if (!targetAlumni.trim() || !targetRole.trim()) return;
+
+    const selected = alumni.find((entry) => entry.name.toLowerCase() === targetAlumni.trim().toLowerCase());
+    if (selected && selected.id) {
+      try {
+        setRequestingMentorId(selected.id);
+        const token = await user.getIdToken();
+        const response = await fetch(`/api/v1/alumni/${selected.id}/request-mentorship`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ message: `I am interested in ${targetRole.trim()} opportunities.` })
+        });
+        if (!response.ok) {
+          throw new Error('Mentorship request failed');
+        }
+      } catch (err) {
+        console.warn('Mentorship request failed:', err);
+      } finally {
+        setRequestingMentorId(null);
+      }
+    }
 
     const newRef = {
       id: `ref_${Date.now()}`,
@@ -596,8 +653,8 @@ export default function CampusAlumniHub() {
               />
             </div>
 
-            <button type="submit" className="w-full py-3 bg-[#b56b37] hover:bg-[#96552a] text-white font-bold text-xs rounded-xl shadow-md cursor-pointer flex items-center justify-center gap-2">
-              <Send className="w-4 h-4" /> Send Referral Request to Alumni
+            <button type="submit" disabled={!!requestingMentorId} className="w-full py-3 bg-[#b56b37] hover:bg-[#96552a] text-white font-bold text-xs rounded-xl shadow-md cursor-pointer flex items-center justify-center gap-2 disabled:opacity-70">
+              <Send className="w-4 h-4" /> {requestingMentorId ? 'Sending request...' : 'Send Referral Request to Alumni'}
             </button>
           </form>
 

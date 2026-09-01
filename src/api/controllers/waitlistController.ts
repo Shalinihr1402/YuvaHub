@@ -1,38 +1,41 @@
 import { Request, Response } from 'express';
+import mongoose from 'mongoose';
 import { EventWaitlist } from '../../models/EventWaitlist';
-import { Event } from '../../models/Event';
 import { addWaitlistPromotionJob } from '../../queues/eventWaitlistQueue';
 import { logger } from '../../utils/logger';
+
+const getEventId = (value?: string | string[]) => Array.isArray(value) ? value[0] : value ?? '';
 
 /**
  * Adds a user to the waitlist for a specific event.
  */
 export const joinWaitlist = async (req: Request, res: Response) => {
     try {
-        const { eventId } = req.params;
+        const eventIdParam = getEventId(req.params.eventId);
         const userId = (req as any).user?.uid;
 
         if (!userId) {
             return res.status(401).json({ error: 'Unauthorized' });
         }
 
-        const event = await Event.findById(eventId);
-        if (!event) {
-            return res.status(404).json({ error: 'Event not found' });
+        if (!eventIdParam) {
+            return res.status(400).json({ error: 'Event ID is required' });
         }
 
+        const eventObjectId = new mongoose.Types.ObjectId(eventIdParam);
+
         // Check if user is already registered or waiting
-        const existingEntry = await EventWaitlist.findOne({ eventId, userId });
+        const existingEntry = await EventWaitlist.findOne({ eventId: eventObjectId, userId });
         if (existingEntry) {
             return res.status(400).json({ error: 'Already in waitlist or registered' });
         }
 
         // Calculate position
-        const waitingCount = await EventWaitlist.countDocuments({ eventId, status: 'waiting' });
+        const waitingCount = await EventWaitlist.countDocuments({ eventId: eventObjectId, status: 'waiting' });
         const newPosition = waitingCount + 1;
 
         const newEntry = await EventWaitlist.create({
-            eventId,
+            eventId: eventObjectId,
             userId,
             position: newPosition,
             status: 'waiting',
@@ -40,10 +43,10 @@ export const joinWaitlist = async (req: Request, res: Response) => {
 
         res.status(201).json({
             message: 'Successfully joined waitlist',
-            data: { position: newPosition, eventId }
+            data: { position: newPosition, eventId: eventObjectId.toString() }
         });
-    } catch (error) {
-        logger.error('Error joining waitlist:', error);
+    } catch (error: any) {
+        logger.error({ err: error }, 'Error joining waitlist');
         res.status(500).json({ error: 'Internal server error' });
     }
 };
@@ -85,8 +88,8 @@ export const claimWaitlistSpot = async (req: Request, res: Response) => {
         );
 
         res.status(200).json({ message: 'Spot successfully claimed!' });
-    } catch (error) {
-        logger.error('Error claiming waitlist spot:', error);
+    } catch (error: any) {
+        logger.error({ err: error }, 'Error claiming waitlist spot');
         res.status(500).json({ error: 'Internal server error' });
     }
 };
@@ -96,10 +99,14 @@ export const claimWaitlistSpot = async (req: Request, res: Response) => {
  */
 export const getWaitlistStatus = async (req: Request, res: Response) => {
     try {
-        const { eventId } = req.params;
+        const eventId = getEventId(req.params.eventId);
         const userId = (req as any).user?.uid;
 
-        const entry = await EventWaitlist.findOne({ eventId, userId });
+        if (!eventId) {
+            return res.status(400).json({ error: 'Event ID is required' });
+        }
+
+        const entry = await EventWaitlist.findOne({ eventId: new mongoose.Types.ObjectId(eventId), userId });
 
         if (!entry) {
             return res.status(404).json({ error: 'Not in waitlist' });
@@ -112,8 +119,8 @@ export const getWaitlistStatus = async (req: Request, res: Response) => {
                 estimatedWaitTime: entry.position * 2, // Mock estimation: 2 hours per position
             }
         });
-    } catch (error) {
-        logger.error('Error fetching waitlist status:', error);
+    } catch (error: any) {
+        logger.error({ err: error }, 'Error fetching waitlist status');
         res.status(500).json({ error: 'Internal server error' });
     }
 };

@@ -17,6 +17,13 @@ import Redis from "ioredis";
 import { v2 as cloudinary } from "cloudinary";
 import { authMiddleware } from "./src/api/middlewares/auth.js";
 import { requestExport, getExportHistory } from "./src/api/controllers/exportController.js";
+import {
+  getCourseCatalog as getPlannerCatalog,
+  getUserRoadmap as getPlannerRoadmap,
+  saveUserRoadmap as savePlannerRoadmap,
+  validatePlacementHandler,
+  configurePlannerDb,
+} from "./src/api/controllers/academicRoadmapController.js";
 import { logStartupHealthReport } from "./src/api/services/healthService.js";
 import { AICacheMetrics } from "./src/api/services/aiCacheMetrics.js";
 
@@ -791,6 +798,13 @@ async function startServer() {
   // --- Export Routes ---
   app.post("/api/v1/export/request", authMiddleware, requestExport);
   app.get("/api/v1/export/history", authMiddleware, getExportHistory);
+
+  // --- Interactive Degree Roadmap Planner ---
+  configurePlannerDb(() => db);
+  app.get("/api/planner/catalog", authMiddleware, getPlannerCatalog);
+  app.get("/api/planner/roadmap", authMiddleware, getPlannerRoadmap);
+  app.post("/api/planner/roadmap", authMiddleware, savePlannerRoadmap);
+  app.post("/api/planner/validate", authMiddleware, validatePlacementHandler);
 
   // --- Real API Routes ---
   app.get("/api/v1/opportunities", async (req, res) => {

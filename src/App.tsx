@@ -43,6 +43,7 @@ const Guidelines = lazy(() => import('./components/tabs/Guidelines'));
 const AboutTab = lazy(() => import('./components/tabs/About'));
 const HelpCenterPage = lazy(() => import('./pages/HelpCenter'));
 const GettingStartedDetail = lazy(() => import('./pages/GettingStartedDetail'));
+const CalendarPage = lazy(() => import('./components/tabs/Calendar'));
 const BountyBoard = lazy(() => import('./components/tabs/BountyBoard'));
 const AuthSecurityCenter = lazy(() => import('./components/tabs/AuthSecurityCenter'));
 const CareerMatchStudio = lazy(() => import('./components/tabs/CareerMatchStudio'));
@@ -311,6 +312,7 @@ function App() {
         { id: 'application_tracker', label: 'Application Tracker', icon: Briefcase },
         { id: 'watchlist_manager', label: 'Watchlists & Alerts', icon: Sparkles, badge: 'NEW' },
         { id: 'deadline_calendar', label: 'Deadline Calendar', icon: Calendar, badge: 'NEW' },
+        { id: 'calendar', label: 'Calendar', icon: Calendar },
         { id: 'opportunity_match', label: 'AI Match Studio', icon: Sparkles, badge: 'AI' },
         { id: 'teams', label: 'Team Builder', icon: Users },
         { id: 'experiences', icon: FileText, label: 'Experiences' },
@@ -393,6 +395,7 @@ function App() {
       case 'opportunities': return <Opportunities />;
       case 'application_tracker': return <ApplicationTracker />;
       case 'deadline_calendar': return <DeadlineCalendar />;
+      case 'calendar': return <CalendarPage />;
       case 'teams': return <Teams />;
       case 'experiences': return <ExperiencesHub />;
       case 'saved-searches': return <SavedSearchManager />;

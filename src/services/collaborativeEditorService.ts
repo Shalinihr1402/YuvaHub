@@ -42,8 +42,8 @@ export const initializeCollaborativeEditor = (io: SocketIOServer) => {
                 // Notify others in the room
                 socket.to(snippetId).emit('user-joined', { userId, socketId: socket.id });
                 logger.info(`User ${userId} joined snippet ${snippetId}`);
-            } catch (error) {
-                logger.error('Error joining snippet:', error);
+            } catch (error: any) {
+                logger.error({ err: error }, 'Error joining snippet');
                 socket.emit('error', { message: 'Failed to join snippet' });
             }
         });
@@ -58,8 +58,8 @@ export const initializeCollaborativeEditor = (io: SocketIOServer) => {
 
                 // Broadcast to all other users in the room
                 socket.to(snippetId).emit('content-updated', { content, userId });
-            } catch (error) {
-                logger.error('Error updating snippet content:', error);
+            } catch (error: any) {
+                logger.error({ err: error }, 'Error updating snippet content');
             }
         });
 

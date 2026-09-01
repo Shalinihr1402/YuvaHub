@@ -32,8 +32,8 @@ export const issueVerifiableCredential = async (userId: string, badgeName: strin
 
         logger.info(`Issued VC for badge: ${badgeName} to user: ${userId}`);
         return newCredential;
-    } catch (error) {
-        logger.error('Error issuing verifiable credential:', error);
+    } catch (error: any) {
+        logger.error({ err: error }, 'Error issuing verifiable credential');
         throw new Error('Failed to issue verifiable credential');
     }
 };
@@ -55,8 +55,8 @@ export const revokeVerifiableCredential = async (credentialId: string) => {
 
         logger.info(`Revoked credential: ${credentialId}`);
         return updated;
-    } catch (error) {
-        logger.error('Error revoking verifiable credential:', error);
+    } catch (error: any) {
+        logger.error({ err: error }, 'Error revoking verifiable credential');
         throw new Error('Failed to revoke credential');
     }
 };

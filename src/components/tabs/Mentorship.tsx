@@ -3,41 +3,20 @@ import {
   Bot, User, Send, Check, Calendar, Clock, Video, Download, 
   ExternalLink, CheckCircle, XCircle, Clock3, AlertCircle, Plus, X, Sparkles, Building2, Award, Shield
 } from 'lucide-react';
-import { db } from '../../lib/firebase';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { ChatMessage } from '../../types';
 import { chatWithAIMentorBackend } from '../../services/apiClient';
-import { fetchMySessions, updateSessionStatus } from '../../services/mentorshipApi';
+import {
+  fetchMentors,
+  fetchMentorAvailability,
+  bookMentorshipSession,
+  fetchMySessions,
+  updateSessionStatus,
+  type MentorProfile,
+  type AvailabilitySlot,
+  type MentorshipSession,
+} from '../../services/mentorshipApi';
 import { EmptyState, ErrorState, LoadingState } from '../ui/states';
 import { useAppContext } from '../../context/AppContext';
-
-interface Mentor {
-  id: string;
-  name: string;
-  org: string;
-  field: string;
-  exp: number;
-  tags: string[];
-}
-
-interface MentorshipSession {
-  sessionId: string;
-  studentUid: string;
-  mentorUid: string;
-  mentorName: string;
-  topic: string;
-  slotDateTime: string;
-  meetingUrl: string;
-  status: 'Pending' | 'Confirmed' | 'Declined' | 'Completed' | string;
-  createdAt?: string;
-}
-
-const DUMMY_MENTORS: Mentor[] = [
-  { id: 'm_sarah', name: 'Sarah Jenkins', org: 'Senior SWE @ Google', field: 'Distributed Systems & Cloud Architecture', exp: 8, tags: ['GSoC Mentor', 'System Design', 'Resume Review'] },
-  { id: 'm_alex', name: 'Alex Rivera', org: 'Staff Engineer @ Stripe', field: 'Backend Infrastructure & FinTech APIs', exp: 10, tags: ['Distributed DBs', 'System Design', 'Mock Interviews'] },
-  { id: 'm_priya', name: 'Priya Sharma', org: 'Tech Lead @ Microsoft', field: 'AI/ML & Cloud Innovation', exp: 6, tags: ['Imagine Cup', 'Machine Learning', 'Career Growth'] },
-  { id: 'm_david', name: 'David Chen', org: 'Principal Designer @ Airbnb', field: 'Product Strategy & UX Systems', exp: 7, tags: ['Portfolio Review', 'Design Thinking', 'UX'] },
-];
 
 export default function Mentorship() {
   const { user, setActiveTab } = useAppContext();
@@ -103,52 +82,111 @@ export default function Mentorship() {
 
 function HumanMain({ user, onBookingCreated }: { user: any; onBookingCreated: () => void }) {
   const [showApply, setShowApply] = useState(false);
-  const [selectedMentor, setSelectedMentor] = useState<Mentor | null>(null);
+  const [selectedMentor, setSelectedMentor] = useState<MentorProfile | null>(null);
+  const [mentors, setMentors] = useState<MentorProfile[]>([]);
+  const [loadingMentors, setLoadingMentors] = useState(true);
+  const [mentorSlots, setMentorSlots] = useState<AvailabilitySlot[]>([]);
+  const [bookingError, setBookingError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    const loadMentors = async () => {
+      try {
+        setLoadingMentors(true);
+        const { mentors: fetchedMentors } = await fetchMentors({ limit: 20 });
+        if (mounted) setMentors(fetchedMentors || []);
+      } catch (error: any) {
+        if (mounted) {
+          setMentors([]);
+          setBookingError(error.message || 'Failed to load mentors');
+        }
+      } finally {
+        if (mounted) setLoadingMentors(false);
+      }
+    };
+
+    void loadMentors();
+    return () => { mounted = false; };
+  }, []);
+
+  const openMentorBooking = async (mentor: MentorProfile) => {
+    setSelectedMentor(mentor);
+    try {
+      const slots = await fetchMentorAvailability(mentor.mentorUid);
+      setMentorSlots(slots || []);
+      setBookingError(null);
+    } catch (error: any) {
+      setMentorSlots([]);
+      setBookingError(error.message || 'Failed to load availability');
+    }
+  };
+
+  if (loadingMentors) {
+    return <LoadingState title="Loading mentors" description="Fetching verified mentors and their availability." />;
+  }
 
   return (
     <div className="space-y-8 animate-fade-in">
+      {bookingError && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-xs text-red-700 font-semibold flex items-center gap-2">
+          <AlertCircle className="w-4 h-4 shrink-0 text-red-600" />
+          {bookingError}
+        </div>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-        {DUMMY_MENTORS.map(m => (
-          <div key={m.id} className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-[#e8ded1] dark:border-slate-800 shadow-2xs flex flex-col justify-between h-full hover:border-[#b56b37] transition-all">
-            <div>
-              <div className="flex justify-between items-start mb-4">
-                <div className="flex gap-3">
-                   <div className="w-12 h-12 rounded-2xl bg-[#603620] text-[#f3e4bd] flex items-center justify-center font-serif font-bold text-lg shadow-2xs">
-                      {m.name.charAt(0)}
-                   </div>
-                   <div>
-                     <h3 className="text-base font-serif font-bold text-[#231f20] dark:text-white leading-tight">{m.name}</h3>
-                     <p className="text-xs font-bold text-[#b56b37] mt-0.5">{m.org}</p>
-                   </div>
-                </div>
-                <span className="px-2.5 py-1 bg-[#63703d]/15 text-[#63703d] text-[10px] font-extrabold rounded-lg border border-[#63703d]/30">{m.exp} Yrs Exp</span>
-              </div>
-              <p className="text-xs text-[#603620] dark:text-slate-300 font-medium mb-4">{m.field}</p>
-              
-              <div className="flex flex-wrap gap-1.5 mt-4">
-                 {m.tags.map(t => (
-                   <span key={t} className="px-2.5 py-1 bg-[#f6efe2] dark:bg-slate-800 text-[#603620] dark:text-slate-300 text-[10px] font-bold rounded-lg border border-[#e8ded1] dark:border-slate-700">
-                     #{t}
-                   </span>
-                 ))}
-              </div>
-            </div>
-            
-            <button 
-              onClick={() => setSelectedMentor(m)}
-              className="w-full py-3 mt-6 bg-[#b56b37] hover:bg-[#96552a] text-white font-bold text-xs rounded-xl transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer"
-            >
-              <Calendar className="w-3.5 h-3.5" /> Schedule 1-on-1 Session
-            </button>
+        {mentors.length === 0 ? (
+          <div className="md:col-span-2 bg-white dark:bg-slate-900 p-6 rounded-3xl border border-[#e8ded1] dark:border-slate-800 text-center text-xs text-[#603620] dark:text-slate-300">
+            No mentors are currently available. Please check back later.
           </div>
-        ))}
+        ) : mentors.map((m) => {
+          const skills = Array.isArray(m.skills) ? m.skills.slice(0, 4) : [];
+          return (
+            <div key={m.mentorUid} className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-[#e8ded1] dark:border-slate-800 shadow-2xs flex flex-col justify-between h-full hover:border-[#b56b37] transition-all">
+              <div>
+                <div className="flex justify-between items-start mb-4">
+                  <div className="flex gap-3">
+                     <div className="w-12 h-12 rounded-2xl bg-[#603620] text-[#f3e4bd] flex items-center justify-center font-serif font-bold text-lg shadow-2xs">
+                        {(m.name || 'M').charAt(0).toUpperCase()}
+                     </div>
+                     <div>
+                       <h3 className="text-base font-serif font-bold text-[#231f20] dark:text-white leading-tight">{m.name}</h3>
+                       <p className="text-xs font-bold text-[#b56b37] mt-0.5">{m.company || m.role || 'Mentor'}</p>
+                     </div>
+                  </div>
+                  <span className="px-2.5 py-1 bg-[#63703d]/15 text-[#63703d] text-[10px] font-extrabold rounded-lg border border-[#63703d]/30">{m.experienceYears || 0} Yrs Exp</span>
+                </div>
+                <p className="text-xs text-[#603620] dark:text-slate-300 font-medium mb-4">{m.headline || m.bio || 'Career advice, resume review, and mock interviews.'}</p>
+                
+                <div className="flex flex-wrap gap-1.5 mt-4">
+                   {skills.length > 0 ? skills.map((skill) => (
+                     <span key={skill} className="px-2.5 py-1 bg-[#f6efe2] dark:bg-slate-800 text-[#603620] dark:text-slate-300 text-[10px] font-bold rounded-lg border border-[#e8ded1] dark:border-slate-700">
+                       #{skill}
+                     </span>
+                   )) : (
+                     <span className="px-2.5 py-1 bg-[#f6efe2] dark:bg-slate-800 text-[#603620] dark:text-slate-300 text-[10px] font-bold rounded-lg border border-[#e8ded1] dark:border-slate-700">
+                       #Career Guidance
+                     </span>
+                   )}
+                </div>
+              </div>
+              
+              <button 
+                onClick={() => void openMentorBooking(m)}
+                className="w-full py-3 mt-6 bg-[#b56b37] hover:bg-[#96552a] text-white font-bold text-xs rounded-xl transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <Calendar className="w-3.5 h-3.5" /> Schedule 1-on-1 Session
+              </button>
+            </div>
+          );
+        })}
       </div>
 
-      {/* Booking Modal */}
       {selectedMentor && (
         <BookingModal 
-          mentor={selectedMentor} 
-          user={user} 
+          mentor={selectedMentor}
+          availableSlots={mentorSlots}
+          user={user}
           onClose={() => setSelectedMentor(null)} 
           onSuccess={() => {
             setSelectedMentor(null);
@@ -157,7 +195,6 @@ function HumanMain({ user, onBookingCreated }: { user: any; onBookingCreated: ()
         />
       )}
 
-      {/* Mentor Application Banner */}
       <div className="relative overflow-hidden bg-gradient-to-r from-[#603620] via-[#482817] to-[#231f20] text-white rounded-3xl p-8 md:p-10 text-center flex flex-col items-center shadow-md border border-[#e8ded1]">
          <div className="relative z-10 max-w-xl space-y-3">
            <h3 className="text-2xl font-serif font-bold text-[#f3e4bd]">Want to guide the next generation?</h3>
@@ -175,44 +212,38 @@ function HumanMain({ user, onBookingCreated }: { user: any; onBookingCreated: ()
   );
 }
 
-function BookingModal({ mentor, user, onClose, onSuccess }: { mentor: Mentor; user: any; onClose: () => void; onSuccess: () => void }) {
-  const [selectedDate, setSelectedDate] = useState('2026-08-15');
-  const [selectedTime, setSelectedTime] = useState('10:00 AM');
+function BookingModal({ mentor, availableSlots, user, onClose, onSuccess }: { mentor: MentorProfile; availableSlots: AvailabilitySlot[]; user: any; onClose: () => void; onSuccess: () => void }) {
+  const [selectedSlotId, setSelectedSlotId] = useState<string>(availableSlots[0]?.id || availableSlots[0]?._id || '');
   const [topic, setTopic] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [bookingError, setBookingError] = useState<string | null>(null);
 
-  const TIME_SLOTS = ['10:00 AM', '11:30 AM', '02:00 PM', '04:00 PM', '05:30 PM'];
+  useEffect(() => {
+    setSelectedSlotId(availableSlots[0]?.id || availableSlots[0]?._id || '');
+  }, [availableSlots]);
 
   const handleBook = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (submitting) return;
+    if (submitting || !selectedSlotId) {
+      setBookingError('Please choose an available time slot before booking.');
+      return;
+    }
 
     setSubmitting(true);
     setBookingError(null);
 
-    const slotDateTime = `${selectedDate} at ${selectedTime} IST`;
-
     try {
-      const res = await fetch('/api/v1/mentorship/book', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          studentUid: user?.uid || 'user_default',
-          mentorUid: mentor.id,
-          mentorName: mentor.name,
-          topic: topic.trim() || 'Resume & Career Growth Strategy',
-          slotDateTime,
-          meetingUrl: `https://meet.jit.si/yuvahub-mentorship-${Date.now()}`
-        })
+      await bookMentorshipSession({
+        mentorUid: mentor.mentorUid,
+        slotId: selectedSlotId,
+        topic: topic.trim() || 'Resume & Career Growth Strategy',
+        agenda: 'Career guidance session',
+        studentName: user?.displayName || user?.name || 'Student',
       });
-
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to book session');
 
       onSuccess();
     } catch (err: any) {
-      setBookingError(err.message);
+      setBookingError(err.message || 'Failed to book session');
     } finally {
       setSubmitting(false);
     }
@@ -220,13 +251,13 @@ function BookingModal({ mentor, user, onClose, onSuccess }: { mentor: Mentor; us
 
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-      <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 max-w-md w-full border border-[#e8ded1] dark:border-slate-800 shadow-2xl space-y-4">
+      <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 max-w-lg w-full border border-[#e8ded1] dark:border-slate-800 shadow-2xl space-y-4">
         <div className="flex justify-between items-center pb-3 border-b border-[#e8ded1] dark:border-slate-800">
           <div>
             <h3 className="font-serif font-bold text-base text-[#231f20] dark:text-white flex items-center gap-2">
               <Calendar className="w-5 h-5 text-[#b56b37]" /> Book Session with {mentor.name}
             </h3>
-            <p className="text-[11px] text-[#603620] dark:text-slate-400 font-semibold">{mentor.org}</p>
+            <p className="text-[11px] text-[#603620] dark:text-slate-400 font-semibold">{mentor.company || mentor.role || 'Verified Mentor'}</p>
           </div>
           <button onClick={onClose} className="text-[#8c7569] hover:text-[#231f20] p-1">
             <X className="w-4 h-4" />
@@ -240,66 +271,66 @@ function BookingModal({ mentor, user, onClose, onSuccess }: { mentor: Mentor; us
           </div>
         )}
 
-        <form onSubmit={handleBook} className="space-y-4 text-xs">
-          <div>
-            <label className="font-bold text-[#603620] uppercase block mb-1">Select Date</label>
-            <input
-              type="date"
-              value={selectedDate}
-              onChange={(e) => setSelectedDate(e.target.value)}
-              className="w-full bg-[#fcf9f2] dark:bg-slate-800 border border-[#e8ded1] dark:border-slate-700 rounded-xl p-3 text-xs text-[#231f20] dark:text-white outline-none"
-              required
-            />
+        {availableSlots.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-[#e8ded1] p-4 text-center text-xs text-[#603620] dark:text-slate-300">
+            This mentor does not have open slots right now. Please check again later.
           </div>
-
-          <div>
-            <label className="font-bold text-[#603620] uppercase block mb-1.5">Available Time Slot</label>
-            <div className="grid grid-cols-3 gap-2">
-              {TIME_SLOTS.map(slot => (
-                <button
-                  key={slot}
-                  type="button"
-                  onClick={() => setSelectedTime(slot)}
-                  className={`py-2 px-2 text-xs font-bold rounded-xl border transition-all cursor-pointer ${
-                    selectedTime === slot
-                      ? 'bg-[#b56b37] text-white border-[#b56b37] shadow-xs'
-                      : 'bg-[#fcf9f2] text-[#603620] border-[#e8ded1] hover:bg-[#f6efe2]'
-                  }`}
-                >
-                  {slot}
-                </button>
-              ))}
+        ) : (
+          <form onSubmit={handleBook} className="space-y-4 text-xs">
+            <div>
+              <label className="font-bold text-[#603620] uppercase block mb-1.5">Available Slots</label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-52 overflow-y-auto pr-1">
+                {availableSlots.map((slot) => {
+                  const slotKey = slot.id || slot._id || `${slot.date}-${slot.startTime}`;
+                  const isSelected = selectedSlotId === slotKey;
+                  return (
+                    <button
+                      key={slotKey}
+                      type="button"
+                      onClick={() => setSelectedSlotId(slotKey)}
+                      className={`text-left rounded-xl border p-3 transition-all ${
+                        isSelected
+                          ? 'border-[#b56b37] bg-[#f8efe7] text-[#231f20]'
+                          : 'border-[#e8ded1] bg-[#fcf9f2] text-[#603620] hover:bg-[#f6efe2]'
+                      }`}
+                    >
+                      <div className="font-bold text-[11px]">{slot.date}</div>
+                      <div className="mt-1 text-[10px] font-medium">{slot.startTime} - {slot.endTime}</div>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
-          </div>
 
-          <div>
-            <label className="font-bold text-[#603620] uppercase block mb-1">Session Topic</label>
-            <textarea
-              value={topic}
-              onChange={(e) => setTopic(e.target.value)}
-              placeholder="e.g. GSoC proposal review, mock system design interview..."
-              className="w-full bg-[#fcf9f2] dark:bg-slate-800 border border-[#e8ded1] dark:border-slate-700 rounded-xl p-3 text-xs text-[#231f20] dark:text-white outline-none resize-none h-20"
-              required
-            />
-          </div>
+            <div>
+              <label className="font-bold text-[#603620] uppercase block mb-1">Session Topic</label>
+              <textarea
+                value={topic}
+                onChange={(e) => setTopic(e.target.value)}
+                placeholder="e.g. GSoC proposal review, mock system design interview..."
+                className="w-full bg-[#fcf9f2] dark:bg-slate-800 border border-[#e8ded1] dark:border-slate-700 rounded-xl p-3 text-xs text-[#231f20] dark:text-white outline-none resize-none h-20"
+                required
+              />
+            </div>
 
-          <div className="flex justify-end gap-2 pt-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2.5 text-xs font-bold text-[#603620] bg-[#f6efe2] rounded-xl hover:bg-[#e8ded1]"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={submitting}
-              className="px-5 py-2.5 text-xs font-bold text-white bg-[#b56b37] hover:bg-[#96552a] rounded-xl shadow-xs disabled:opacity-50 cursor-pointer"
-            >
-              {submitting ? 'Booking...' : 'Confirm Request'}
-            </button>
-          </div>
-        </form>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2.5 text-xs font-bold text-[#603620] bg-[#f6efe2] rounded-xl hover:bg-[#e8ded1]"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={submitting || !selectedSlotId}
+                className="px-5 py-2.5 text-xs font-bold text-white bg-[#b56b37] hover:bg-[#96552a] rounded-xl shadow-xs disabled:opacity-50 cursor-pointer"
+              >
+                {submitting ? 'Booking...' : 'Confirm Request'}
+              </button>
+            </div>
+          </form>
+        )}
       </div>
     </div>
   );
@@ -360,12 +391,10 @@ function MyBookingsMain({ user }: { user: any }) {
   const fetchSessions = async () => {
     setError(null);
     try {
-      const res = await fetch(`/api/v1/mentorship/sessions?uid=${user?.uid || 'user_default'}`);
-      if (!res.ok) throw new Error('Failed to load your bookings');
-      const data = await res.json();
+      const data = await fetchMySessions();
       setSessions(data.sessions || []);
     } catch (err: any) {
-      setError(err.message);
+      setError(err.message || 'Failed to load your bookings');
     } finally {
       setLoading(false);
     }
@@ -397,9 +426,13 @@ function MyBookingsMain({ user }: { user: any }) {
             <h3 className="font-serif font-bold text-base text-[#231f20] dark:text-white mt-1">{s.topic}</h3>
             <p className="text-xs text-[#603620] font-semibold mt-0.5">Mentor: {s.mentorName} • {s.slotDateTime}</p>
           </div>
-          <a href={s.meetingUrl} target="_blank" rel="noopener noreferrer" className="px-4 py-2 bg-[#b56b37] text-white text-xs font-bold rounded-xl flex items-center gap-2">
-            <Video className="w-3.5 h-3.5" /> Join Video Call
-          </a>
+          {s.meetingUrl ? (
+            <a href={s.meetingUrl} target="_blank" rel="noopener noreferrer" className="px-4 py-2 bg-[#b56b37] text-white text-xs font-bold rounded-xl flex items-center gap-2">
+              <Video className="w-3.5 h-3.5" /> Join Video Call
+            </a>
+          ) : (
+            <span className="px-4 py-2 bg-[#f6efe2] text-[#603620] text-xs font-bold rounded-xl">Awaiting link</span>
+          )}
         </div>
       ))}
     </div>

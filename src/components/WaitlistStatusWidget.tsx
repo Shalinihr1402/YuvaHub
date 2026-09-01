@@ -23,7 +23,7 @@ export const WaitlistStatusWidget: React.FC<WaitlistStatusWidgetProps> = ({ even
                 // const data = await res.json();
 
                 // Simulated response
-                const mockData = { position: 3, status: 'waiting', estimatedWaitTime: 6 };
+                const mockData = { position: 3, status: 'waiting' as const, estimatedWaitTime: 6 };
                 setPosition(mockData.position);
                 setStatus(mockData.status);
                 setEstimatedWaitTime(mockData.estimatedWaitTime);

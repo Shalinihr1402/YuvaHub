@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { getResumeDraft, upsertResumeDraft } from '../../models/resumeDraft.js';
 import { generatePdf } from '../../services/pdfGenerator.js';
-import { dbQuery } from '../../db.js';
+import { dbQuery } from '../db.js';
 
 // Helper to get user profile data for hydration
 export const getProfileData = async (req: Request, res: Response) => {

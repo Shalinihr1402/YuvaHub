@@ -14,21 +14,47 @@ const mockValidToken = config.MOCK_VALID_TOKEN || 'MOCK_VALID_TOKEN';
 // Initialize Firebase Admin
 try {
   if (config.FIREBASE_SERVICE_ACCOUNT_BASE64) {
-    const serviceAccount = JSON.parse(
-      Buffer.from(
+    let serviceAccount: any = null;
+
+    try {
+      const decodedServiceAccount = Buffer.from(
         config.FIREBASE_SERVICE_ACCOUNT_BASE64,
         'base64',
-      ).toString('utf8'),
-    );
+      ).toString('utf8');
+      serviceAccount = JSON.parse(decodedServiceAccount);
+    } catch (parseError) {
+      console.warn(
+        '[Auth] FIREBASE_SERVICE_ACCOUNT_BASE64 is not valid JSON. Falling back to mock or project-id auth mode.',
+      );
+    }
 
-    initializeApp({
-      credential: cert(serviceAccount),
-    });
+    if (serviceAccount && typeof serviceAccount === 'object' && serviceAccount.project_id) {
+      initializeApp({
+        credential: cert(serviceAccount),
+      });
 
-    isFirebaseInitialized = true;
-    console.log(
-      '[Auth] Firebase Admin initialized with provided service account.',
-    );
+      isFirebaseInitialized = true;
+      console.log(
+        '[Auth] Firebase Admin initialized with provided service account.',
+      );
+    } else if (config.FIREBASE_PROJECT_ID) {
+      initializeApp({
+        projectId: config.FIREBASE_PROJECT_ID,
+      });
+
+      isFirebaseInitialized = true;
+      console.log(
+        '[Auth] Firebase Admin initialized with Application Default Credentials / Project ID.',
+      );
+    } else if (isDevelopment && mockAuthEnabled) {
+      console.warn(
+        '[Auth] WARNING: Firebase credentials not found or invalid. Mock authentication is ENABLED for development.',
+      );
+    } else {
+      console.warn(
+        '[Auth] Firebase credentials not found or invalid. Mock authentication is disabled.',
+      );
+    }
   } else if (config.FIREBASE_PROJECT_ID) {
     initializeApp({
       projectId: config.FIREBASE_PROJECT_ID,

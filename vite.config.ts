@@ -13,25 +13,15 @@ export default defineConfig(({ mode }) => {
   // GEMINI_API_KEY are deliberately excluded from Vite's environment.
   const env = loadEnv(mode, ".", ["VITE_", "SENTRY_"]);
   const shouldAnalyze = process.env.ANALYZE === "true" || mode === "analyze";
+  const isTestMode = process.env.VITEST === "true" || mode === "test";
 
-  return {
-    plugins: [
-      react(),
-      tailwindcss(),
-      sentryVitePlugin({
-        org: env.SENTRY_ORG || process.env.SENTRY_ORG,
-        project: env.SENTRY_PROJECT || process.env.SENTRY_PROJECT,
-        authToken: env.SENTRY_AUTH_TOKEN || process.env.SENTRY_AUTH_TOKEN,
-      }),
-      shouldAnalyze && visualizer({
-        filename: "stats.html",
-        open: false,
-        gzipSize: true,
-        brotliSize: true,
-        template: "treemap",
-      }),
-      // PWA + Workbox — client-build only; the esbuild server bundle is unaffected
-      VitePWA({
+  let pwaPlugin: ReturnType<typeof VitePWA> | null = null;
+  if (!isTestMode) {
+    try {
+      // PWA + Workbox — client-build only; the esbuild server bundle is unaffected.
+      // Some Node/Vite combinations crash while initializing this plugin, so fall back
+      // gracefully instead of aborting the whole app startup.
+      pwaPlugin = VitePWA({
         registerType: "autoUpdate",
         injectRegister: "auto",
         includeAssets: ["favicon.svg", "robots.txt"],
@@ -99,7 +89,29 @@ export default defineConfig(({ mode }) => {
             },
           ],
         },
+      });
+    } catch (error: any) {
+      console.warn("[vite.config] VitePWA initialization failed; continuing without PWA support.", error?.message || error);
+    }
+  }
+
+  return {
+    plugins: [
+      react(),
+      tailwindcss(),
+      sentryVitePlugin({
+        org: env.SENTRY_ORG || process.env.SENTRY_ORG,
+        project: env.SENTRY_PROJECT || process.env.SENTRY_PROJECT,
+        authToken: env.SENTRY_AUTH_TOKEN || process.env.SENTRY_AUTH_TOKEN,
       }),
+      shouldAnalyze && visualizer({
+        filename: "stats.html",
+        open: false,
+        gzipSize: true,
+        brotliSize: true,
+        template: "treemap",
+      }),
+      pwaPlugin,
     ].filter(Boolean),
     define: {
       'process.env.VITE_EMAILJS_SERVICE_ID': JSON.stringify(env.VITE_EMAILJS_SERVICE_ID),

@@ -51,8 +51,8 @@ export const applyAIRedaction = async (text: string): Promise<{ redactedText: st
         const log = [{ field: 'contextual_pii', originalLength: text.length - redactedText.length, redacted: true }];
 
         return { redactedText, log };
-    } catch (error) {
-        logger.error('AI Redaction failed:', error);
+    } catch (error: any) {
+        logger.error({ err: error }, 'AI Redaction failed');
         throw new Error('Failed to process document with AI');
     }
 };

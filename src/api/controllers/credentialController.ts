@@ -22,8 +22,8 @@ export const requestCredential = async (req: Request, res: Response) => {
             message: 'Verifiable credential issued successfully',
             data: newVC
         });
-    } catch (error) {
-        logger.error('Error requesting credential:', error);
+    } catch (error: any) {
+        logger.error({ err: error }, 'Error requesting credential');
         res.status(500).json({ error: 'Internal server error' });
     }
 };
@@ -40,8 +40,8 @@ export const getUserWallet = async (req: Request, res: Response) => {
             .select('-__v');
 
         res.status(200).json({ data: credentials });
-    } catch (error) {
-        logger.error('Error fetching user wallet:', error);
+    } catch (error: any) {
+        logger.error({ err: error }, 'Error fetching user wallet');
         res.status(500).json({ error: 'Internal server error' });
     }
 };
@@ -69,8 +69,8 @@ export const exportCredential = async (req: Request, res: Response) => {
         res.setHeader('Content-Disposition', `attachment; filename="credential-${credential.badgeName.replace(/\s+/g, '-').toLowerCase()}.json"`);
 
         res.status(200).json(exportData);
-    } catch (error) {
-        logger.error('Error exporting credential:', error);
+    } catch (error: any) {
+        logger.error({ err: error }, 'Error exporting credential');
         res.status(500).json({ error: 'Internal server error' });
     }
 };

@@ -10,12 +10,12 @@
 import path from 'path';
 import ejs from 'ejs';
 import puppeteer from 'puppeteer';
-import DOMPurify from 'dompurify';
+import createDOMPurify from 'dompurify';
 import { JSDOM } from 'jsdom';
 
 // Initialise DOMPurify with a JSDOM window (server‑side usage)
-const window = new JSDOM('').window as unknown as Window;
-const purify = DOMPurify(window);
+const { window } = new JSDOM('');
+const purify = createDOMPurify(window as any);
 
 /**
  * Render a resume template (EJS) with the supplied data and return a PDF buffer.
@@ -52,7 +52,7 @@ export async function generatePdf(templateId: string, data: any): Promise<Buffer
   });
   const page = await browser.newPage();
 
-  await page.setContent(html, { waitUntil: 'networkidle0' });
+  await page.setContent(html, { waitUntil: 'load' });
   const pdfBuffer = await page.pdf({
     format: 'A4',
     printBackground: true,
@@ -60,5 +60,5 @@ export async function generatePdf(templateId: string, data: any): Promise<Buffer
   });
 
   await browser.close();
-  return pdfBuffer;
+  return Buffer.from(pdfBuffer);
 }

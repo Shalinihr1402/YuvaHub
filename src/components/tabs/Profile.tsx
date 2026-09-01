@@ -16,7 +16,9 @@ export default function Profile() {
     uid: user?.uid || '', name: user?.displayName || '', email: user?.email || '',
     college: '', year: '', field: '', city: '', state: '', country: '', phone: '',
     githubUrl: '', linkedinUrl: '', portfolioUrl: '', bio: '', avatarUrl: '', skills: [],
-    avatarPublicId: '', resumeUrl: '', resumePublicId: '', coverLetterUrl: '', coverLetterPublicId: ''
+    avatarPublicId: '', resumeUrl: '', resumePublicId: '', coverLetterUrl: '', coverLetterPublicId: '',
+    graduation_year: '', current_company: '', current_role: '', alumni_status: false,
+    is_open_to_mentoring: false, mentoring_interests: [], alumni_profile_bio: ''
   });
   
   const [skillInput, setSkillInput] = useState('');
@@ -191,7 +193,29 @@ export default function Profile() {
     try {
       await setDoc(doc(db, 'users', user.uid), formData, { merge: true });
 
-      // Synchronize changes to MongoDB backend
+      try {
+        const token = await user.getIdToken(true);
+        await fetch(`/api/v1/users/${user.uid}/profile`, {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            ...formData,
+            graduation_year: formData.graduation_year ?? null,
+            current_company: formData.current_company ?? '',
+            current_role: formData.current_role ?? '',
+            alumni_status: Boolean(formData.alumni_status),
+            is_open_to_mentoring: Boolean(formData.is_open_to_mentoring),
+            mentoring_interests: formData.mentoring_interests || [],
+            alumni_profile_bio: formData.alumni_profile_bio || ''
+          })
+        });
+      } catch (dbErr) {
+        console.warn("MongoDB sync failed on profile save:", dbErr);
+      }
+
       try {
         const token = await user.getIdToken(true);
         await fetch("/api/v1/auth/sync", {
@@ -412,6 +436,88 @@ export default function Profile() {
               <div className="space-y-1 pt-2">
                  <label className="text-xs font-bold text-[#603620]">Bio <span className="text-[#8c7569] font-normal">(Max 200 chars)</span></label>
                  <textarea placeholder="Write a short summary..." maxLength={200} rows={3} className="w-full bg-[#fcf9f2] border border-[#e8ded1] rounded-xl p-3 text-xs text-[#231f20] outline-none focus:border-[#b56b37] resize-none" value={formData.bio} onChange={e => setFormData({...formData, bio: e.target.value})} />
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <h3 className="text-lg font-serif font-bold text-[#231f20] border-b border-[#e8ded1] pb-3">Alumni Profile</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <label className="flex items-center gap-2 text-xs font-bold text-[#603620] bg-[#fcf9f2] border border-[#e8ded1] rounded-xl px-3 py-3">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(formData.alumni_status)}
+                    onChange={(e) => setFormData({ ...formData, alumni_status: e.target.checked, role: e.target.checked ? 'alumni' : formData.role || 'student' })}
+                    className="h-4 w-4 accent-[#b56b37]"
+                  />
+                  I am an alum
+                </label>
+
+                <label className="flex items-center gap-2 text-xs font-bold text-[#603620] bg-[#fcf9f2] border border-[#e8ded1] rounded-xl px-3 py-3">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(formData.is_open_to_mentoring)}
+                    onChange={(e) => setFormData({ ...formData, is_open_to_mentoring: e.target.checked })}
+                    className="h-4 w-4 accent-[#b56b37]"
+                  />
+                  Open to mentoring
+                </label>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-[#603620]">Graduation Year</label>
+                  <input
+                    type="number"
+                    min={2000}
+                    max={2100}
+                    placeholder="2023"
+                    value={formData.graduation_year ?? ''}
+                    onChange={(e) => setFormData({ ...formData, graduation_year: e.target.value ? Number(e.target.value) : null })}
+                    className="w-full bg-[#fcf9f2] border border-[#e8ded1] rounded-xl p-3 text-xs text-[#231f20] outline-none focus:border-[#b56b37]"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-[#603620]">Current Company</label>
+                  <input
+                    type="text"
+                    placeholder="Google, Microsoft, etc."
+                    value={formData.current_company || ''}
+                    onChange={(e) => setFormData({ ...formData, current_company: e.target.value })}
+                    className="w-full bg-[#fcf9f2] border border-[#e8ded1] rounded-xl p-3 text-xs text-[#231f20] outline-none focus:border-[#b56b37]"
+                  />
+                </div>
+
+                <div className="space-y-1 md:col-span-2">
+                  <label className="text-xs font-bold text-[#603620]">Current Role</label>
+                  <input
+                    type="text"
+                    placeholder="Senior Software Engineer"
+                    value={formData.current_role || ''}
+                    onChange={(e) => setFormData({ ...formData, current_role: e.target.value })}
+                    className="w-full bg-[#fcf9f2] border border-[#e8ded1] rounded-xl p-3 text-xs text-[#231f20] outline-none focus:border-[#b56b37]"
+                  />
+                </div>
+
+                <div className="space-y-1 md:col-span-2">
+                  <label className="text-xs font-bold text-[#603620]">Mentoring Interests</label>
+                  <input
+                    type="text"
+                    placeholder="Frontend, AI, Career growth, Product"
+                    value={(formData.mentoring_interests || []).join(', ')}
+                    onChange={(e) => setFormData({ ...formData, mentoring_interests: e.target.value ? e.target.value.split(',').map(i => i.trim()).filter(Boolean) : [] })}
+                    className="w-full bg-[#fcf9f2] border border-[#e8ded1] rounded-xl p-3 text-xs text-[#231f20] outline-none focus:border-[#b56b37]"
+                  />
+                </div>
+
+                <div className="space-y-1 md:col-span-2">
+                  <label className="text-xs font-bold text-[#603620]">Alumni Bio</label>
+                  <textarea
+                    placeholder="Tell students what you can mentor them on..."
+                    rows={3}
+                    value={formData.alumni_profile_bio || ''}
+                    onChange={(e) => setFormData({ ...formData, alumni_profile_bio: e.target.value })}
+                    className="w-full bg-[#fcf9f2] border border-[#e8ded1] rounded-xl p-3 text-xs text-[#231f20] outline-none focus:border-[#b56b37] resize-none"
+                  />
+                </div>
               </div>
             </div>
 

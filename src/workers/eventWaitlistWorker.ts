@@ -1,7 +1,6 @@
 import { Worker, Job } from 'bullmq';
 import { redisClient } from '../config/redis';
 import { EventWaitlist } from '../models/EventWaitlist';
-import { Event } from '../models/Event';
 import { User } from '../models/User';
 import { logger } from '../utils/logger';
 import crypto from 'crypto';
@@ -40,23 +39,23 @@ export const eventWaitlistWorker = new Worker(
             nextInLine.notifiedAt = new Date();
             await nextInLine.save();
 
-            // 4. Fetch user and event details for notification
+            // 4. Fetch user details for notification and use the event ID directly where no Event model exists.
             const user = await User.findById(nextInLine.userId);
-            const event = await Event.findById(eventId);
+            const eventTitle = `Event ${String(eventId)}`;
 
-            if (user && event) {
-                logger.info(`Promoted user ${user.email} for event ${event.title}. Sending notification...`);
+            if (user) {
+                logger.info(`Promoted user ${user.email} for ${eventTitle}. Sending notification...`);
                 // TODO: Integrate with actual email service (e.g., Nodemailer/SendGrid)
                 // await sendEmail({
                 //   to: user.email,
-                //   subject: `Spot Available: ${event.title}`,
+                //   subject: `Spot Available: ${eventTitle}`,
                 //   html: `<p>A spot has opened up! Claim it here: ${process.env.FRONTEND_URL}/claim?token=${claimToken}</p>`
                 // });
             }
 
             return { status: 'promoted', userId: nextInLine.userId, claimToken };
         } catch (error) {
-            logger.error(`Waitlist promotion worker failed for event ${eventId}:`, error);
+            logger.error({ err: error }, `Waitlist promotion worker failed for event ${eventId}`);
             throw error;
         }
     },

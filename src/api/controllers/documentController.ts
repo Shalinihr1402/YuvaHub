@@ -30,8 +30,8 @@ export const uploadDocument = async (req: Request, res: Response) => {
             message: 'Document uploaded and queued for redaction',
             data: { id: newDoc._id, status: newDoc.status }
         });
-    } catch (error) {
-        logger.error('Error uploading document:', error);
+    } catch (error: any) {
+        logger.error({ err: error }, 'Error uploading document');
         res.status(500).json({ error: 'Internal server error' });
     }
 };
@@ -65,8 +65,8 @@ export const generateShareLink = async (req: Request, res: Response) => {
         const shareUrl = `${process.env.FRONTEND_URL}/shared/doc/${shareToken}`;
 
         res.status(200).json({ message: 'Share link generated', data: { shareUrl, expiresAt: shareExpiresAt } });
-    } catch (error) {
-        logger.error('Error generating share link:', error);
+    } catch (error: any) {
+        logger.error({ err: error }, 'Error generating share link');
         res.status(500).json({ error: 'Internal server error' });
     }
 };
@@ -79,8 +79,8 @@ export const getUserDocuments = async (req: Request, res: Response) => {
         const userId = (req as any).user?.uid;
         const docs = await SecureDocument.find({ userId }).sort({ createdAt: -1 }).select('-shareToken');
         res.status(200).json({ data: docs });
-    } catch (error) {
-        logger.error('Error fetching user documents:', error);
+    } catch (error: any) {
+        logger.error({ err: error }, 'Error fetching user documents');
         res.status(500).json({ error: 'Internal server error' });
     }
 };

@@ -1,96 +1,254 @@
-import { Request, Response } from "express";
-import { dbCommand, dbQuery } from "../db.js";
-import { safeObjectId } from "../../lib/utils.js";
-import { sendSuccess, sendError, sendBadRequest, sendNotFound } from "../../lib/apiResponse.js";
-import { CourseCatalog } from "../../models/courseCatalogSchema.js";
-import { AcademicRoadmap, AcademicRoadmapSchema } from "../../models/academicRoadmapSchema.js";
+/**
+ * Interactive Degree Roadmap Planner — API controller.
+ *
+ * Routes (all behind `authMiddleware`, registered in `server.ts`):
+ *   GET  /api/planner/catalog   → full course catalog
+ *   GET  /api/planner/roadmap   → the current user's saved roadmap (or a blank one)
+ *   POST /api/planner/roadmap   → persist the user's roadmap (recomputes warnings)
+ *   POST /api/planner/validate  → validate a single drag-and-drop placement
+ *
+ * Storage: one document per user in `academic_roadmaps` keyed by `userId`
+ * (Firebase uid). The course catalog is seeded from `src/data/courseCatalog.ts`
+ * into `course_catalog` on first read, so it also works against the MockDB.
+ */
 
-const MOCK_COURSE_CATALOG: CourseCatalog[] = [
-  { id: "cs101", code: "CS 101", title: "Introduction to Computer Science", credits: 4, description: "Basic programming.", prerequisites: [], corequisites: [], termsOffered: ["Fall", "Spring"] },
-  { id: "cs102", code: "CS 102", title: "Data Structures", credits: 4, description: "Lists, trees, graphs.", prerequisites: ["cs101"], corequisites: [], termsOffered: ["Fall", "Spring"] },
-  { id: "cs201", code: "CS 201", title: "Algorithms", credits: 4, description: "Algorithm design.", prerequisites: ["cs102"], corequisites: [], termsOffered: ["Fall", "Spring"] },
-  { id: "math101", code: "MATH 101", title: "Calculus I", credits: 4, description: "Limits and derivatives.", prerequisites: [], corequisites: [], termsOffered: ["Fall", "Spring"] },
-  { id: "math102", code: "MATH 102", title: "Calculus II", credits: 4, description: "Integrals.", prerequisites: ["math101"], corequisites: [], termsOffered: ["Fall", "Spring"] },
-  { id: "cs301", code: "CS 301", title: "Operating Systems", credits: 4, description: "OS principles.", prerequisites: ["cs201"], corequisites: [], termsOffered: ["Fall"] },
-  { id: "cs401", code: "CS 401", title: "Artificial Intelligence", credits: 4, description: "Intro to AI.", prerequisites: ["cs201"], corequisites: [], termsOffered: ["Spring"] },
-];
+import { dbCommand, dbQuery } from "../db";
+import { sendSuccess, sendError, sendBadRequest } from "../../lib/apiResponse";
+import { z } from "zod";
+import {
+  getCourseCatalog as getCatalogData,
+  DEFAULT_GRADUATION_REQUIREMENTS,
+  CatalogCourse,
+} from "../../data/courseCatalog";
+import {
+  validateRoadmap,
+  validatePlacement,
+  calculateGraduationProgress,
+  PlannerSemester,
+} from "../../utils/prerequisiteValidator";
+import {
+  SaveRoadmapRequestSchema,
+  ValidatePlacementRequestSchema,
+} from "../../models/academicRoadmapSchema";
+import { CourseCatalogSchema as CourseSchema } from "../../models/courseCatalogSchema";
 
-export const getCourseCatalog = async (req: Request, res: Response) => {
+const CATALOG_COLLECTION = "course_catalog";
+const ROADMAP_COLLECTION = "academic_roadmaps";
+
+/**
+ * `server.ts` owns the live Mongo connection (its own `db`), while the modular
+ * `src/api/db.ts` pools (`dbCommand`/`dbQuery`) are only populated when that
+ * layer is initialised. `configurePlannerDb` lets the host hand us its live
+ * handle; we fall back to the modular pools, then to the static catalog.
+ */
+let dbGetter: (() => any) | null = null;
+export function configurePlannerDb(getter: () => any) {
+  dbGetter = getter;
+}
+
+const readDb = () => dbGetter?.() || dbQuery || dbCommand;
+const writeDb = () => dbGetter?.() || dbCommand || dbQuery;
+
+function uidOf(req: any): string | null {
+  return req?.user?.uid || req?.user?.firebaseUid || req?.user?.user_id || null;
+}
+
+/**
+ * Load the catalog, seeding the collection from the static dataset the first
+ * time it is empty. Falls back to the static dataset on any DB error.
+ */
+async function loadCatalog(): Promise<CatalogCourse[]> {
+  const seed = getCatalogData();
+  const db = readDb();
+  if (!db) return seed;
+
   try {
-    return sendSuccess(res, { courses: MOCK_COURSE_CATALOG });
-  } catch (err) {
-    return sendError(res, "Failed to retrieve course catalog", 500);
-  }
-};
-
-export const getUserRoadmap = async (req: Request, res: Response) => {
-  try {
-    const userId = req.user?.uid || req.user?._id?.toString();
-    if (!userId) return sendBadRequest(res, "User not authenticated");
-
-    if (!dbQuery) {
-      return sendSuccess(res, { roadmap: { userId, semesters: [], totalCreditsPlanned: 0, graduationRequirementCredits: 120 } });
+    const col = db.collection(CATALOG_COLLECTION);
+    const existing = await col.find({}).toArray();
+    if (existing && existing.length > 0) {
+      return existing
+        .map((doc: any) => {
+          const parsed = CourseSchema.safeParse(doc);
+          return parsed.success ? parsed.data : null;
+        })
+        .filter(Boolean) as CatalogCourse[];
     }
-
-    const doc = await dbQuery.collection("academic_roadmaps").findOne({ userId });
-    
-    if (!doc) {
-      return sendSuccess(res, { roadmap: { userId, semesters: [], totalCreditsPlanned: 0, graduationRequirementCredits: 120 } });
-    }
-
-    return sendSuccess(res, { roadmap: doc });
-  } catch (err) {
-    return sendError(res, "Failed to retrieve roadmap", 500);
-  }
-};
-
-export const saveUserRoadmap = async (req: Request, res: Response) => {
-  try {
-    const userId = req.user?.uid || req.user?._id?.toString();
-    if (!userId) return sendBadRequest(res, "User not authenticated");
-
-    const parsed = AcademicRoadmapSchema.safeParse({ ...req.body, userId });
-    if (!parsed.success) {
-      return sendBadRequest(res, "Invalid roadmap data");
-    }
-
-    const data = parsed.data;
-    
-    // Server-side validation logic for prerequisites
-    const courseToSemesterIndex = new Map<string, number>();
-    data.semesters.forEach((semester, index) => {
-      semester.courseIds.forEach(courseId => {
-        courseToSemesterIndex.set(courseId, index);
-      });
-    });
-
-    for (const semester of data.semesters) {
-      const currentSemIndex = data.semesters.indexOf(semester);
-      for (const courseId of semester.courseIds) {
-        const course = MOCK_COURSE_CATALOG.find(c => c.id === courseId);
-        if (course) {
-          for (const prereqId of course.prerequisites) {
-            const prereqSemIndex = courseToSemesterIndex.get(prereqId);
-            if (prereqSemIndex !== undefined && prereqSemIndex >= currentSemIndex) {
-              return sendBadRequest(res, `Prerequisite violation: ${course.code} requires ${prereqId} to be taken before it.`);
-            }
-          }
+    // Seed once.
+    const wdb = writeDb();
+    if (wdb) {
+      const col2 = wdb.collection(CATALOG_COLLECTION);
+      for (const course of seed) {
+        try {
+          await col2.updateOne({ id: course.id }, { $set: course }, { upsert: true });
+        } catch {
+          /* best-effort seed */
         }
       }
     }
+    return seed;
+  } catch {
+    return seed;
+  }
+}
 
-    if (!dbCommand) {
-      return sendSuccess(res, { message: "Roadmap saved successfully (mock)", roadmap: data });
+function blankRoadmap(userId: string) {
+  return {
+    userId,
+    degreeProgram: "B.S. Computer Science",
+    startSemester: "Fall 2026",
+    semesters: [] as PlannerSemester[],
+    completedCourses: [] as string[],
+    totalCreditsPlanned: 0,
+    graduationRequirements: { ...DEFAULT_GRADUATION_REQUIREMENTS },
+    warnings: [],
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────
+
+export async function getCourseCatalog(req: any, res: any) {
+  try {
+    const courses = await loadCatalog();
+    return sendSuccess(res, {
+      data: { courses, graduationRequirements: DEFAULT_GRADUATION_REQUIREMENTS },
+    });
+  } catch (err) {
+    console.error("[Planner] getCatalog failed:", err);
+    return sendError(res, "Failed to load course catalog");
+  }
+}
+
+export async function getUserRoadmap(req: any, res: any) {
+  const userId = uidOf(req);
+  if (!userId) return sendError(res, "Unauthorized", 401);
+
+  try {
+    const db = readDb();
+    let doc: any = null;
+    if (db) {
+      doc = await db.collection(ROADMAP_COLLECTION).findOne({ userId });
     }
+    const roadmap = doc ? { ...blankRoadmap(userId), ...doc } : blankRoadmap(userId);
 
-    await dbCommand.collection("academic_roadmaps").updateOne(
-      { userId },
-      { $set: data },
-      { upsert: true }
+    const courses = await loadCatalog();
+    const progress = calculateGraduationProgress({
+      semesters: roadmap.semesters,
+      courses,
+      completedCourses: roadmap.completedCourses,
+      requirements: roadmap.graduationRequirements,
+    });
+    // Keep warnings fresh even if the catalog changed since last save.
+    roadmap.warnings = validateRoadmap(
+      roadmap.semesters,
+      courses,
+      roadmap.completedCourses,
     );
 
-    return sendSuccess(res, { message: "Roadmap saved successfully", roadmap: data });
+    return sendSuccess(res, { data: { roadmap, progress } });
   } catch (err) {
-    return sendError(res, "Failed to save roadmap", 500);
+    console.error("[Planner] getRoadmap failed:", err);
+    return sendError(res, "Failed to load roadmap");
   }
-};
+}
+
+export async function saveUserRoadmap(req: any, res: any) {
+  const userId = uidOf(req);
+  if (!userId) return sendError(res, "Unauthorized", 401);
+
+  let body;
+  try {
+    body = SaveRoadmapRequestSchema.parse(req.body ?? {});
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return res
+        .status(400)
+        .json({ success: false, error: "Validation failed", details: err.issues });
+    }
+    return sendBadRequest(res, "Invalid roadmap payload");
+  }
+
+  try {
+    const courses = await loadCatalog();
+    const db = writeDb();
+
+    const existing = db
+      ? await db.collection(ROADMAP_COLLECTION).findOne({ userId })
+      : null;
+    const base = existing
+      ? { ...blankRoadmap(userId), ...existing }
+      : blankRoadmap(userId);
+
+    const completedCourses = body.completedCourses ?? base.completedCourses ?? [];
+    const graduationRequirements = {
+      ...DEFAULT_GRADUATION_REQUIREMENTS,
+      ...base.graduationRequirements,
+      ...(body.graduationRequirements ?? {}),
+    };
+
+    const warnings = validateRoadmap(body.semesters, courses, completedCourses);
+    const progress = calculateGraduationProgress({
+      semesters: body.semesters,
+      courses,
+      completedCourses,
+      requirements: graduationRequirements,
+    });
+
+    const roadmap = {
+      userId,
+      degreeProgram: body.degreeProgram ?? base.degreeProgram,
+      startSemester: body.startSemester ?? base.startSemester,
+      semesters: body.semesters,
+      completedCourses,
+      graduationRequirements,
+      totalCreditsPlanned: progress.totalCreditsPlanned,
+      warnings,
+      createdAt: base.createdAt ?? new Date(),
+      updatedAt: new Date(),
+    };
+
+    if (db) {
+      await db
+        .collection(ROADMAP_COLLECTION)
+        .updateOne({ userId }, { $set: roadmap }, { upsert: true });
+    }
+
+    return sendSuccess(res, { data: { roadmap, progress } });
+  } catch (err) {
+    console.error("[Planner] saveRoadmap failed:", err);
+    return sendError(res, "Failed to save roadmap");
+  }
+}
+
+export async function validatePlacementHandler(req: any, res: any) {
+  const userId = uidOf(req);
+  if (!userId) return sendError(res, "Unauthorized", 401);
+
+  let body;
+  try {
+    body = ValidatePlacementRequestSchema.parse(req.body ?? {});
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return res
+        .status(400)
+        .json({ success: false, error: "Validation failed", details: err.issues });
+    }
+    return sendBadRequest(res, "Invalid validation payload");
+  }
+
+  try {
+    const courses = await loadCatalog();
+    const result = validatePlacement({
+      courseId: body.courseId,
+      targetSemesterId: body.targetSemesterId,
+      semesters: body.semesters,
+      courses,
+      completedCourses: body.completedCourses ?? [],
+    });
+    return sendSuccess(res, { data: result });
+  } catch (err) {
+    console.error("[Planner] validatePlacement failed:", err);
+    return sendError(res, "Failed to validate placement");
+  }
+}

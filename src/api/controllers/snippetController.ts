@@ -23,8 +23,8 @@ export const createSnippet = async (req: Request, res: Response) => {
         });
 
         res.status(201).json({ message: 'Snippet created', data: newSnippet });
-    } catch (error) {
-        logger.error('Error creating snippet:', error);
+    } catch (error: any) {
+        logger.error({ err: error }, 'Error creating snippet');
         res.status(500).json({ error: 'Internal server error' });
     }
 };
@@ -47,8 +47,8 @@ export const getSnippet = async (req: Request, res: Response) => {
         }
 
         res.status(200).json({ data: snippet });
-    } catch (error) {
-        logger.error('Error fetching snippet:', error);
+    } catch (error: any) {
+        logger.error({ err: error }, 'Error fetching snippet');
         res.status(500).json({ error: 'Internal server error' });
     }
 };
@@ -75,8 +75,8 @@ export const getPublicSnippets = async (req: Request, res: Response) => {
             data: snippets,
             pagination: { total, page, limit, totalPages: Math.ceil(total / limit) },
         });
-    } catch (error) {
-        logger.error('Error fetching public snippets:', error);
+    } catch (error: any) {
+        logger.error({ err: error }, 'Error fetching public snippets');
         res.status(500).json({ error: 'Internal server error' });
     }
 };

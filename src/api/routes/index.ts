@@ -42,6 +42,7 @@ import skillAssessmentRoutes from "./skillAssessmentRoutes.js";
 import voteRoutes from "./voteRoutes.js";
 import studyRoomRoutes from "./studyRoomRoutes.js";
 import observabilityRoutes from "./observabilityRoutes.js";
+import calendarRoutes from "./calendarRoutes.js";
 import { errorHandler } from "../middlewares/errorHandler.js";
 import { apiVersionHeaders } from "../versioning/middleware.js";
 

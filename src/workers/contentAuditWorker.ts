@@ -48,7 +48,7 @@ export const contentAuditWorker = new Worker(
             logger.info(`Audit completed for ${contentId}. Accessibility: ${report.accessibilityScore}, SEO: ${report.seoScore}`);
             return { status: 'completed', reportId: report._id };
         } catch (error) {
-            logger.error(`Content audit failed for ${contentId}:`, error);
+            logger.error({ err: error }, `Content audit failed for ${contentId}`);
             await AuditReport.findByIdAndUpdate(job.data.contentId, { status: 'failed' }); // Simplified for example
             throw error;
         }
